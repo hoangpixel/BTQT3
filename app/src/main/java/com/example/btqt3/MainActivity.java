@@ -5,7 +5,7 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
-import android.media.MediaPlayer; // Thư viện phát nhạc
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.TextView;
@@ -21,8 +21,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private long lastUpdateGyro = 0;
     private TextView tvStatus;
 
-    // Khai báo biến phát nhạc
     private MediaPlayer mediaPlayer;
+
+    // THÊM BIẾN NÀY ĐỂ LƯU TRẠNG THÁI ĐÈN
+    private boolean isLightOn = false; // Mặc định ban đầu coi như đèn đang tắt
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -51,7 +53,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         sensorManager.unregisterListener(this);
     }
 
-    // Nhớ giải phóng bộ nhớ khi tắt app để không bị lỗi RAM
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -64,17 +65,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) { }
 
-    // HÀM PHÁT NHẠC MỚI (Thay thế cho gửi lệnh IoT)
     private void playSound(int soundResource, String actionName) {
-        // Cập nhật chữ trên màn hình
         tvStatus.setText(actionName);
-
-        // Nếu đang phát âm thanh cũ thì dừng lại để phát âm mới
         if (mediaPlayer != null) {
             mediaPlayer.release();
         }
-
-        // Tạo và phát âm thanh mới
         mediaPlayer = MediaPlayer.create(this, soundResource);
         if (mediaPlayer != null) {
             mediaPlayer.start();
@@ -86,7 +81,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         long curTime = System.currentTimeMillis();
 
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            if ((curTime - lastUpdateAccel) > 1000) { // Giãn cách 1 giây để Google voice đọc xong
+            if ((curTime - lastUpdateAccel) > 1000) {
                 float x = event.values[0];
                 float y = event.values[1];
                 float z = event.values[2];
@@ -94,10 +89,19 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 float acceleration = (float) Math.sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH;
                 float SHAKE_THRESHOLD = 8.0f;
 
+                // LOGIC BẬT/TẮT ĐÈN MỚI
                 if (acceleration > SHAKE_THRESHOLD) {
-                    // Gọi file MP3 từ thư mục raw
-                    playSound(R.raw.battatden, "Vẫy tay: Bật/Tắt đèn");
+                    if (isLightOn) {
+                        // Đang bật -> Vẫy tay thì Tắt
+                        playSound(R.raw.tatden, "Vẫy tay: Tắt đèn");
+                        isLightOn = false; // Cập nhật trạng thái
+                    } else {
+                        // Đang tắt -> Vẫy tay thì Bật
+                        playSound(R.raw.batden, "Vẫy tay: Bật đèn");
+                        isLightOn = true; // Cập nhật trạng thái
+                    }
                     lastUpdateAccel = curTime;
+
                 } else if (y > 5.0f) {
                     playSound(R.raw.tangamluong, "Nghiêng lên: Tăng âm lượng");
                     lastUpdateAccel = curTime;
