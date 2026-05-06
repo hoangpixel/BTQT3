@@ -38,6 +38,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private CameraManager cameraManager;
     private String cameraId;
 
+    private static final long SENSOR_ACTION_COOLDOWN_MS = 2200;
+    private static final float FLAT_Z_THRESHOLD = 8.5f;
+    private static final float FLAT_XY_MAX = 4.0f;
+
+    private volatile boolean isDeviceFlat = false;
+
     private static final int REQUEST_CODE_SPEECH_INPUT = 1000;
 
     @Override
@@ -185,10 +191,17 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         long curTime = System.currentTimeMillis();
 
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-            if ((curTime - lastUpdateAccel) > 1500) { // Giới hạn thời gian giữa các lần lắc
-                float x = event.values[0];
-                float y = event.values[1];
-                float z = event.values[2];
+            float x = event.values[0];
+            float y = event.values[1];
+            float z = event.values[2];
+
+            // Khi đặt máy nằm ngang (face up/down trên bàn) thì bỏ qua toàn bộ tín hiệu để tránh bị nhạy
+            isDeviceFlat = Math.abs(z) >= FLAT_Z_THRESHOLD && Math.abs(x) <= FLAT_XY_MAX && Math.abs(y) <= FLAT_XY_MAX;
+            if (isDeviceFlat) {
+                return;
+            }
+
+            if ((curTime - lastUpdateAccel) > SENSOR_ACTION_COOLDOWN_MS) { // Giới hạn thời gian giữa các lần
                 float acceleration = (float) Math.sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH;
 
                 // 1. LẮC MẠNH -> GỌI AI (Như gọi Hey Siri)
@@ -223,7 +236,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
 
         if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
-            if ((curTime - lastUpdateGyro) > 1500) {
+            if (isDeviceFlat) {
+                return;
+            }
+
+            if ((curTime - lastUpdateGyro) > SENSOR_ACTION_COOLDOWN_MS) {
                 float rotateZ = event.values[2];
                 if (rotateZ > 3.5f) { // Xoay trái
                     playSound(R.raw.nextbai, "Xoay: TIẾP THEO");
@@ -244,8 +261,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     @Override
     protected void onResume() {
         super.onResume();
-        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
-        sensorManager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME);
+        if (sensorManager != null && accelerometer != null) {
+            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+        }
+        if (sensorManager != null && gyroscope != null) {
+            sensorManager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME);
+        }
     }
 
     @Override

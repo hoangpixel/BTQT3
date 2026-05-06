@@ -4,6 +4,8 @@ plugins {
 
 android {
     namespace = "com.example.btqt3"
+    
+    // Restore the specific Android 36.1 configuration
     compileSdk {
         version = release(36) {
             minorApiLevel = 1
@@ -29,9 +31,18 @@ android {
             )
         }
     }
+    
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}
+
+// Use Java Toolchain to ensure a proper JDK with jlink is used for the build.
+// Using Java 21 to match the version mentioned in the error path.
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
     }
 }
 
