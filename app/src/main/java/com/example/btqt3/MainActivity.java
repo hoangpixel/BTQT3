@@ -46,6 +46,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     private static final int REQUEST_CODE_SPEECH_INPUT = 1000;
 
+    private Sensor proximitySensor;
+    private long lastUpdateProximity = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -55,10 +58,14 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         tvSpeechResult = findViewById(R.id.tvSpeechResult);
         btnMic = findViewById(R.id.btnMic);
 
+        // Khởi tạo SensorManager TRƯỚC
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         if (sensorManager != null) {
             accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
             gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+
+            // Khởi tạo proximitySensor ở đây mới đúng nè
+            proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         }
 
         cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
@@ -102,6 +109,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             tvSpeechResult.setText("Ní vừa nói: " + spokenText);
 
             // LOGIC XỬ LÝ LỆNH
+// LOGIC XỬ LÝ LỆNH
             if (spokenText.contains("bật đèn")) {
                 toggleFlashlight(true);
                 isLightOn = true;
@@ -122,6 +130,16 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             } else if (spokenText.contains("quay lại") || spokenText.contains("lùi bài")) {
                 sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Lệnh: LÙI BÀI");
                 playSound(R.raw.prevbai, "Đang lùi bài...");
+            }
+
+            // THÊM 2 LỆNH MỚI Ở ĐÂY NÈ
+            else if (spokenText.contains("bật nhạc") || spokenText.contains("mở nhạc")) {
+                sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PLAY, "Lệnh: BẬT NHẠC");
+                // Tui để sẵn hàm playSound, ông có file mp3 thì bỏ vào, không thì xóa dòng playSound này đi nha
+                // playSound(R.raw.batnhac, "Đang phát nhạc...");
+            } else if (spokenText.contains("tắt nhạc") || spokenText.contains("dừng nhạc")) {
+                sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PAUSE, "Lệnh: DỪNG NHẠC");
+                // playSound(R.raw.tatnhac, "Đã dừng nhạc...");
             }
         }
     }
@@ -190,65 +208,83 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     public void onSensorChanged(SensorEvent event) {
         long curTime = System.currentTimeMillis();
 
-        if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
+        // ==========================================
+        // 1. CẢM BIẾN TIỆM CẬN (VẪY TAY -> BẬT/TẮT ĐÈN)
+        // ==========================================
+        if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) {
+            float distance = event.values[0];
+            // Nếu có vật cản (tay che qua) cách cảm biến dưới 2cm
+            if (distance < 2.0f) {
+                if ((curTime - lastUpdateProximity) > SENSOR_ACTION_COOLDOWN_MS) {
+                    if (isLightOn) {
+                        playSound(R.raw.tatden, "Vẫy tay: TẮT ĐÈN");
+                        toggleFlashlight(false);
+                        isLightOn = false;
+                    } else {
+                        playSound(R.raw.batden, "Vẫy tay: BẬT ĐÈN");
+                        toggleFlashlight(true);
+                        isLightOn = true;
+                    }
+                    lastUpdateProximity = curTime;
+                }
+            }
+        }
+
+        // ==========================================
+        // 2. GIA TỐC KẾ (LẮC MẠNH -> GỌI AI)
+        // ==========================================
+// ==========================================
+        // 2. GIA TỐC KẾ (LẮC MẠNH -> GỌI AI)
+        // ==========================================
+        else if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
             float x = event.values[0];
             float y = event.values[1];
             float z = event.values[2];
 
-            // Khi đặt máy nằm ngang (face up/down trên bàn) thì bỏ qua toàn bộ tín hiệu để tránh bị nhạy
             isDeviceFlat = Math.abs(z) >= FLAT_Z_THRESHOLD && Math.abs(x) <= FLAT_XY_MAX && Math.abs(y) <= FLAT_XY_MAX;
-            if (isDeviceFlat) {
-                return;
-            }
+            if (isDeviceFlat) return;
 
-            if ((curTime - lastUpdateAccel) > SENSOR_ACTION_COOLDOWN_MS) { // Giới hạn thời gian giữa các lần
+            if ((curTime - lastUpdateAccel) > SENSOR_ACTION_COOLDOWN_MS) {
                 float acceleration = (float) Math.sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH;
 
-                // 1. LẮC MẠNH -> GỌI AI (Như gọi Hey Siri)
+                // Điểm mấu chốt là số 18.0f ở đây
                 if (acceleration > 18.0f) {
                     wakeUpAI();
-                    lastUpdateAccel = curTime;
-                }
-                // 2. LẮC VỪA -> BẬT/TẮT ĐÈN NHANH
-                else if (acceleration > 9.0f) {
-                    if (isLightOn) {
-                        playSound(R.raw.tatden, "Lắc: TẮT ĐÈN");
-                        toggleFlashlight(false);
-                        isLightOn = false;
-                    } else {
-                        playSound(R.raw.batden, "Lắc: BẬT ĐÈN");
-                        toggleFlashlight(true);
-                        isLightOn = true;
-                    }
-                    lastUpdateAccel = curTime;
-                }
-                // 3. NGHIÊNG MÁY -> CHỈNH ÂM LƯỢNG
-                else if (y > 6.0f) {
-                    playSound(R.raw.tangamluong, "Nghiêng: TĂNG ÂM");
-                    adjustSystemVolume(AudioManager.ADJUST_RAISE);
-                    lastUpdateAccel = curTime;
-                } else if (y < -6.0f) {
-                    playSound(R.raw.giamamluong, "Nghiêng: GIẢM ÂM");
-                    adjustSystemVolume(AudioManager.ADJUST_LOWER);
                     lastUpdateAccel = curTime;
                 }
             }
         }
 
-        if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
-            if (isDeviceFlat) {
-                return;
-            }
+        // ==========================================
+        // 3. CON QUAY HỒI CHUYỂN (ÂM LƯỢNG & CHUYỂN BÀI)
+        // ==========================================
+        else if (event.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
+            if (isDeviceFlat) return;
 
             if ((curTime - lastUpdateGyro) > SENSOR_ACTION_COOLDOWN_MS) {
-                float rotateZ = event.values[2];
-                if (rotateZ > 3.5f) { // Xoay trái
+                float rotateX = event.values[0]; // Trục X: Gật / Ngửa điện thoại
+                float rotateZ = event.values[2]; // Trục Z: Xoay vô-lăng trái / phải
+
+                // --- CHUYỂN BÀI (Xoay vô-lăng) ---
+// --- CHUYỂN BÀI (Xoay vô-lăng) ---
+                if (rotateZ > 3.5f) { // Xoay sang TRÁI (Giá trị dương) -> LÙI BÀI
+                    playSound(R.raw.prevbai, "Xoay: QUAY LẠI");
+                    sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Lùi bài...");
+                    lastUpdateGyro = curTime;
+                } else if (rotateZ < -3.5f) { // Xoay sang PHẢI (Giá trị âm) -> TIẾP THEO
                     playSound(R.raw.nextbai, "Xoay: TIẾP THEO");
                     sendMediaCommand(KeyEvent.KEYCODE_MEDIA_NEXT, "Chuyển bài...");
                     lastUpdateGyro = curTime;
-                } else if (rotateZ < -3.5f) { // Xoay phải
-                    playSound(R.raw.prevbai, "Xoay: QUAY LẠI");
-                    sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Lùi bài...");
+                }
+
+                // --- CHỈNH ÂM LƯỢNG (Ngửa/Gập điện thoại) ---
+                else if (rotateX > 3.0f) { // Gập đầu máy xuống
+                    playSound(R.raw.giamamluong, "Nghiêng: GIẢM ÂM");
+                    adjustSystemVolume(AudioManager.ADJUST_LOWER);
+                    lastUpdateGyro = curTime;
+                } else if (rotateX < -3.0f) { // Ngửa đầu máy lên
+                    playSound(R.raw.tangamluong, "Nghiêng: TĂNG ÂM");
+                    adjustSystemVolume(AudioManager.ADJUST_RAISE);
                     lastUpdateGyro = curTime;
                 }
             }
@@ -261,11 +297,17 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     @Override
     protected void onResume() {
         super.onResume();
-        if (sensorManager != null && accelerometer != null) {
-            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
-        }
-        if (sensorManager != null && gyroscope != null) {
-            sensorManager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME);
+        if (sensorManager != null) {
+            if (accelerometer != null) {
+                sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
+            }
+            if (gyroscope != null) {
+                sensorManager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME);
+            }
+            // Thêm dòng này cho cảm biến tiệm cận
+            if (proximitySensor != null) {
+                sensorManager.registerListener(this, proximitySensor, SensorManager.SENSOR_DELAY_NORMAL);
+            }
         }
     }
 
