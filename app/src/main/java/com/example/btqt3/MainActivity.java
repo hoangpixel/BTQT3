@@ -136,10 +136,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             else if (spokenText.contains("bật nhạc") || spokenText.contains("mở nhạc")) {
                 sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PLAY, "Lệnh: BẬT NHẠC");
                 // Tui để sẵn hàm playSound, ông có file mp3 thì bỏ vào, không thì xóa dòng playSound này đi nha
-                // playSound(R.raw.batnhac, "Đang phát nhạc...");
+                 playSound(R.raw.batnhac, "Đang phát nhạc...");
             } else if (spokenText.contains("tắt nhạc") || spokenText.contains("dừng nhạc")) {
                 sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PAUSE, "Lệnh: DỪNG NHẠC");
-                // playSound(R.raw.tatnhac, "Đã dừng nhạc...");
+                 playSound(R.raw.tatnhac, "Đã dừng nhạc...");
             }
         }
     }
