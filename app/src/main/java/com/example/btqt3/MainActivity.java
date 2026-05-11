@@ -14,9 +14,10 @@ import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.view.KeyEvent;
 import android.view.View;
-import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
@@ -31,7 +32,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private long lastUpdateAccel = 0;
     private long lastUpdateGyro = 0;
     private TextView tvStatus, tvSpeechResult;
-    private ImageButton btnMic;
+    private FloatingActionButton btnMic;
     private MediaPlayer mediaPlayer;
 
     private boolean isLightOn = false;
@@ -41,6 +42,18 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private static final long SENSOR_ACTION_COOLDOWN_MS = 2200;
     private static final float FLAT_Z_THRESHOLD = 8.5f;
     private static final float FLAT_XY_MAX = 4.0f;
+
+    // Tilt-to-switch-song (nghiêng trái/phải để lùi/chuyển bài)
+    private static final float TILT_TRIGGER_DEG = 18.0f;
+    private static final float TILT_NEUTRAL_DEG = 8.0f;
+    private static final long TILT_HOLD_MS = 220;
+    private static final long TILT_ACTION_COOLDOWN_MS = 1200;
+
+    private final float[] gravity = new float[]{0f, 0f, 0f};
+    private long tiltCandidateStartMs = 0;
+    private int tiltCandidateDir = 0; // -1: left, +1: right, 0: none
+    private boolean tiltArmed = true;
+    private long lastTiltSongActionMs = 0;
 
     private volatile boolean isDeviceFlat = false;
 
@@ -244,6 +257,50 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             isDeviceFlat = Math.abs(z) >= FLAT_Z_THRESHOLD && Math.abs(x) <= FLAT_XY_MAX && Math.abs(y) <= FLAT_XY_MAX;
             if (isDeviceFlat) return;
 
+            // --- NGHIÊNG TRÁI/PHẢI -> LÙI/CHUYỂN BÀI (dựa trên hướng trọng lực, không cần lắc) ---
+            // Low-pass filter để tách trọng lực khỏi rung/lắc
+            final float alpha = 0.85f;
+            gravity[0] = alpha * gravity[0] + (1 - alpha) * x;
+            gravity[1] = alpha * gravity[1] + (1 - alpha) * y;
+            gravity[2] = alpha * gravity[2] + (1 - alpha) * z;
+
+            // Góc nghiêng trái/phải (độ). Dùng X so với Z: màn hình ngửa lên (z ~ +9.8) => góc ~ 0.
+            float tiltDeg = (float) Math.toDegrees(Math.atan2(gravity[0], gravity[2]));
+
+            int dir = 0;
+            if (tiltDeg <= -TILT_TRIGGER_DEG) {
+                dir = -1; // nghiêng trái
+            } else if (tiltDeg >= TILT_TRIGGER_DEG) {
+                dir = 1; // nghiêng phải
+            }
+
+            // Khi quay lại vùng trung tính thì "arm" lại để lần nghiêng sau mới bắn tiếp
+            if (Math.abs(tiltDeg) <= TILT_NEUTRAL_DEG) {
+                tiltArmed = true;
+                tiltCandidateDir = 0;
+                tiltCandidateStartMs = 0;
+            } else if (tiltArmed && dir != 0) {
+                // Debounce: phải giữ nghiêng ổn định một chút mới thực hiện
+                if (tiltCandidateDir != dir) {
+                    tiltCandidateDir = dir;
+                    tiltCandidateStartMs = curTime;
+                }
+
+                boolean holdEnough = (curTime - tiltCandidateStartMs) >= TILT_HOLD_MS;
+                boolean cooldownOk = (curTime - lastTiltSongActionMs) >= TILT_ACTION_COOLDOWN_MS;
+                if (holdEnough && cooldownOk) {
+                    if (dir > 0) {
+                        playSound(R.raw.prevbai, "Nghiêng trái: LÙI BÀI");
+                        sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Lùi bài...");
+                    } else {
+                        playSound(R.raw.nextbai, "Nghiêng phải: TIẾP THEO");
+                        sendMediaCommand(KeyEvent.KEYCODE_MEDIA_NEXT, "Chuyển bài...");
+                    }
+                    lastTiltSongActionMs = curTime;
+                    tiltArmed = false;
+                }
+            }
+
             if ((curTime - lastUpdateAccel) > SENSOR_ACTION_COOLDOWN_MS) {
                 float acceleration = (float) Math.sqrt(x * x + y * y + z * z) - SensorManager.GRAVITY_EARTH;
 
@@ -263,22 +320,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
             if ((curTime - lastUpdateGyro) > SENSOR_ACTION_COOLDOWN_MS) {
                 float rotateX = event.values[0]; // Trục X: Gật / Ngửa điện thoại
-                float rotateZ = event.values[2]; // Trục Z: Xoay vô-lăng trái / phải
-
-                // --- CHUYỂN BÀI (Xoay vô-lăng) ---
-// --- CHUYỂN BÀI (Xoay vô-lăng) ---
-                if (rotateZ > 3.5f) { // Xoay sang TRÁI (Giá trị dương) -> LÙI BÀI
-                    playSound(R.raw.prevbai, "Xoay: QUAY LẠI");
-                    sendMediaCommand(KeyEvent.KEYCODE_MEDIA_PREVIOUS, "Lùi bài...");
-                    lastUpdateGyro = curTime;
-                } else if (rotateZ < -3.5f) { // Xoay sang PHẢI (Giá trị âm) -> TIẾP THEO
-                    playSound(R.raw.nextbai, "Xoay: TIẾP THEO");
-                    sendMediaCommand(KeyEvent.KEYCODE_MEDIA_NEXT, "Chuyển bài...");
-                    lastUpdateGyro = curTime;
-                }
 
                 // --- CHỈNH ÂM LƯỢNG (Ngửa/Gập điện thoại) ---
-                else if (rotateX > 3.0f) { // Gập đầu máy xuống
+                if (rotateX > 3.0f) { // Gập đầu máy xuống
                     playSound(R.raw.giamamluong, "Nghiêng: GIẢM ÂM");
                     adjustSystemVolume(AudioManager.ADJUST_LOWER);
                     lastUpdateGyro = curTime;
